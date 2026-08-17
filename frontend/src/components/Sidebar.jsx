@@ -1,10 +1,11 @@
-// Sidebar: document list with status badges, upload button, and delete.
+// Sidebar: document list with status badges, upload button, delete, user menu.
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { FileText, Loader2, Trash2, Upload, XCircle } from 'lucide-react'
+import { FileText, Loader2, LogOut, Trash2, Upload, XCircle } from 'lucide-react'
 import { deleteDocument, listDocuments } from '../api.js'
 import { useAppStore } from '../store.js'
+import { useAuth } from '../AuthContext.jsx'
 import UploadModal from './UploadModal.jsx'
 
 const STATUS_BADGE = {
@@ -23,18 +24,51 @@ function StatusBadge({ status }) {
   )
 }
 
+function DocumentRow({ doc, active, onSelect, onDelete }) {
+  return (
+    <div
+      className={`group mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+        active ? 'bg-zinc-800' : 'hover:bg-zinc-900'
+      }`}
+    >
+      <button
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        title={`Ask questions about ${doc.filename}`}
+      >
+        <FileText size={18} className="shrink-0 text-zinc-400" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{doc.filename}</p>
+          <p className="text-xs text-zinc-500">{doc.num_pages} pages</p>
+        </div>
+      </button>
+      <div className="flex flex-col items-end gap-1.5">
+        <StatusBadge status={doc.status} />
+        <button
+          onClick={onDelete}
+          className="hidden rounded p-1 text-zinc-500 hover:bg-red-500/10 hover:text-red-400 group-hover:block"
+          title="Delete document"
+          aria-label={`Delete ${doc.filename}`}
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function Sidebar({ onDocSelected }) {
   const [uploadOpen, setUploadOpen] = useState(false)
   const queryClient = useQueryClient()
   const { activeDocId, setActiveDocId } = useAppStore()
+  const { user, logout } = useAuth()
 
   const { data: docs, isLoading } = useQuery({
     queryKey: ['documents'],
     queryFn: listDocuments,
   })
 
-  const handleDelete = async (docId, filename, e) => {
-    e.stopPropagation()
+  const handleDelete = async (docId, filename) => {
     if (!window.confirm(`Delete "${filename}"? This removes the PDF, index, and chat history.`)) return
     try {
       await deleteDocument(docId)
@@ -52,6 +86,22 @@ export default function Sidebar({ onDocSelected }) {
         <div>
           <h1 className="text-lg font-bold">RAG PDF Q&amp;A</h1>
           <p className="text-xs text-zinc-500">Local · Free · No API keys</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span
+            className="max-w-[110px] truncate rounded-full bg-zinc-800 px-2.5 py-1 text-[11px] text-zinc-400"
+            title={user?.email}
+          >
+            {user?.email}
+          </span>
+          <button
+            onClick={logout}
+            className="rounded-lg p-1.5 text-zinc-500 hover:bg-red-500/10 hover:text-red-400"
+            title="Log out"
+            aria-label="Log out"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       </div>
 
@@ -81,32 +131,16 @@ export default function Sidebar({ onDocSelected }) {
         )}
 
         {docs?.map((doc) => (
-          <button
+          <DocumentRow
             key={doc.id}
-            onClick={() => setActiveDocId(doc.id)}
-            className={`group mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
-              activeDocId === doc.id ? 'bg-zinc-800' : 'hover:bg-zinc-900'
-            }`}
-          >
-            <FileText size={18} className="shrink-0 text-zinc-400" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{doc.filename}</p>
-              <p className="text-xs text-zinc-500">{doc.num_pages} pages</p>
-            </div>
-            <div className="flex flex-col items-end gap-1.5">
-              <StatusBadge status={doc.status} />
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => handleDelete(doc.id, doc.filename, e)}
-                onKeyDown={(e) => e.key === 'Enter' && handleDelete(doc.id, doc.filename, e)}
-                className="hidden rounded p-1 text-zinc-500 hover:bg-red-500/10 hover:text-red-400 group-hover:block"
-                title="Delete document"
-              >
-                <Trash2 size={14} />
-              </span>
-            </div>
-          </button>
+            doc={doc}
+            active={activeDocId === doc.id}
+            onSelect={() => {
+              setActiveDocId(doc.id)
+              onDocSelected?.()
+            }}
+            onDelete={() => handleDelete(doc.id, doc.filename)}
+          />
         ))}
 
         {docs?.some((d) => d.status === 'failed') && (

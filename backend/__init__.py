@@ -1,1 +1,0 @@
-from database import Base, engine, SessionLocal  # noqa: F401  (imported for convenience)

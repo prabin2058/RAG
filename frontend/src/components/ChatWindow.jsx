@@ -1,4 +1,8 @@
 // Main chat panel: history, input, thinking indicator, auto-scroll.
+//
+// Optimistic updates use the TanStack Query v5 pattern:
+//   setQueryData() to insert the user's message immediately,
+//   invalidateQueries() to replace with server truth on settle.
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
@@ -7,6 +11,10 @@ import { getConversationHistory, sendQuery } from '../api.js'
 import { useAppStore } from '../store.js'
 import MessageBubble from './MessageBubble.jsx'
 
+function historyKey(docId) {
+  return ['conversations', docId]
+}
+
 export default function ChatWindow() {
   const activeDocId = useAppStore((s) => s.activeDocId)
   const [input, setInput] = useState('')
@@ -14,19 +22,12 @@ export default function ChatWindow() {
   const [conversationId, setConversationId] = useState(null)
   const scrollRef = useRef(null)
   const queryClient = useQueryClient()
-  // Optimistic messages shown while a query is in flight / before refetch lands.
-  const pendingRef = useRef([])
 
   // Flatten conversation history into a single message list.
   const { data, isLoading } = useQuery({
-    queryKey: ['conversations', activeDocId],
+    queryKey: historyKey(activeDocId),
     queryFn: () => getConversationHistory(activeDocId),
     enabled: !!activeDocId,
-    // Once the refetched history (with the server's copy of our messages)
-    // arrives, drop the optimistic duplicates.
-    onSuccess: () => {
-      pendingRef.current = []
-    },
   })
 
   const messages =
@@ -38,7 +39,6 @@ export default function ChatWindow() {
   useEffect(() => {
     setConversationId(null)
     setInput('')
-    pendingRef.current = []
   }, [activeDocId])
 
   // Auto-scroll to the newest message.
@@ -53,30 +53,48 @@ export default function ChatWindow() {
 
     setInput('')
     setThinking(true)
-    // Optimistically render the user's message while the LLM is thinking.
-    pendingRef.current = [
-      ...pendingRef.current,
-      { id: `temp-${Date.now()}`, role: 'user', content: question, sources: null, created_at: null },
-    ]
+
+    // Optimistically insert the user message into the cache.
+    const optimistic = {
+      id: `temp-${Date.now()}`,
+      role: 'user',
+      content: question,
+      sources: null,
+      created_at: new Date().toISOString(),
+    }
+    queryClient.setQueryData(historyKey(activeDocId), (old) => {
+      const convs = old?.conversations ?? []
+      const target = convs.find((c) => c.id === conversationId)
+      if (target) {
+        return {
+          ...old,
+          conversations: convs.map((c) =>
+            c.id === conversationId ? { ...c, messages: [...c.messages, optimistic] } : c,
+          ),
+        }
+      }
+      return {
+        doc_id: activeDocId,
+        conversations: [
+          ...convs,
+          { id: conversationId || 'pending', created_at: new Date().toISOString(), messages: [optimistic] },
+        ],
+      }
+    })
 
     try {
       const res = await sendQuery(activeDocId, question, conversationId)
       setConversationId(res.conversation_id)
-      queryClient.invalidateQueries({ queryKey: ['conversations', activeDocId] })
+      // Refetch replaces the optimistic cache with server truth.
+      queryClient.invalidateQueries({ queryKey: historyKey(activeDocId) })
     } catch (err) {
       toast.error(err.message)
-      pendingRef.current = pendingRef.current.filter((m) => m.content !== question)
+      // Roll back the optimistic message on failure.
+      queryClient.invalidateQueries({ queryKey: historyKey(activeDocId) })
     } finally {
       setThinking(false)
     }
   }
-
-  // Merge optimistic + server messages, newest last.
-  const allMessages = [...pendingRef.current, ...messages].sort((a, b) => {
-    const at = a.created_at ? new Date(a.created_at) : new Date()
-    const bt = b.created_at ? new Date(b.created_at) : new Date()
-    return at - bt
-  })
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -99,7 +117,7 @@ export default function ChatWindow() {
           </div>
         )}
 
-        {activeDocId && !isLoading && allMessages.length === 0 && (
+        {activeDocId && !isLoading && messages.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
             <p className="text-zinc-300">Document ready — ask away!</p>
             <p className="text-sm text-zinc-500">
@@ -109,8 +127,8 @@ export default function ChatWindow() {
         )}
 
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
-          {allMessages.map((m, i) => (
-            <MessageBubble key={m.id || i} message={m} />
+          {messages.map((m, i) => (
+            <MessageBubble key={m.id ?? `idx-${i}`} message={m} />
           ))}
 
           {thinking && (

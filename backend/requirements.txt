@@ -6,3 +6,8 @@ sqlalchemy
 pdfplumber
 python-multipart
 requests
+pydantic-settings
+email-validator
+bcrypt
+pyjwt
+alembic
