@@ -15,9 +15,14 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24h
 
+    # LLM Settings
+    LLM_PROVIDER: str = "gemini"  # "gemini" or "ollama"
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+
     # Ollama
     OLLAMA_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "gemma4"
+    OLLAMA_MODEL: str = "qwen3:4b"
 
     # Storage
     DATA_DIR: Path = BASE_DIR / "data"
@@ -31,8 +36,12 @@ class Settings(BaseSettings):
         return f"sqlite:///{self.DATA_DIR / 'rag.db'}"
 
     @property
+    def files_dir(self) -> Path:
+        return self.DATA_DIR / "files"
+
+    @property
     def pdf_dir(self) -> Path:
-        return self.DATA_DIR / "pdfs"
+        return self.files_dir
 
     @property
     def chroma_dir(self) -> Path:
@@ -41,5 +50,5 @@ class Settings(BaseSettings):
 
 settings = Settings()
 settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
-settings.pdf_dir.mkdir(parents=True, exist_ok=True)
+settings.files_dir.mkdir(parents=True, exist_ok=True)
 settings.chroma_dir.mkdir(parents=True, exist_ok=True)

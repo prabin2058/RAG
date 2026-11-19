@@ -11,3 +11,6 @@ email-validator
 bcrypt
 pyjwt
 alembic
+python-docx
+openpyxl
+google-genai

@@ -16,6 +16,8 @@ dependencies = [
     "bcrypt",
     "pyjwt",
     "alembic",
+    "python-docx",
+    "openpyxl",
 ]
 
 [project.optional-dependencies]
