@@ -9,6 +9,8 @@ class QueryRequest(BaseModel):
     doc_id: str
     question: str
     conversation_id: str | None = None
+    page_start: int | None = None  # filter: search from this page
+    page_end: int | None = None    # filter: search up to this page
 
 
 class Source(BaseModel):

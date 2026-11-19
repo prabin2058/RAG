@@ -36,14 +36,33 @@ def add_chunks(doc_id: str, chunks: list[dict], embeddings: list[list[float]]) -
 
 
 def query_chunks(
-    doc_id: str, embedding: list[float], k: int = 5
+    doc_id: str,
+    embedding: list[float],
+    k: int = 5,
+    page_start: int | None = None,
+    page_end: int | None = None,
 ) -> list[dict]:
-    """Return the top-k most similar chunks: {page_number, snippet, distance}."""
+    """Return the top-k most similar chunks with optional page range filter."""
     collection = _get_client().get_or_create_collection(name=doc_id)
+
+    where_filter = None
+    if page_start is not None and page_end is not None:
+        where_filter = {
+            "$and": [
+                {"page_number": {"$gte": page_start}},
+                {"page_number": {"$lte": page_end}},
+            ]
+        }
+    elif page_start is not None:
+        where_filter = {"page_number": {"$gte": page_start}}
+    elif page_end is not None:
+        where_filter = {"page_number": {"$lte": page_end}}
+
     results = collection.query(
         query_embeddings=[embedding],
         n_results=min(k, collection.count()),
         include=["documents", "metadatas", "distances"],
+        where=where_filter,
     )
     chunks = []
     if not results["documents"]:
