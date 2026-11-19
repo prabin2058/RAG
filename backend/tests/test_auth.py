@@ -43,7 +43,7 @@ def test_register_invalid_email_422(client):
 def test_login_ok(client, user_a):
     res = client.post(
         "/api/v1/auth/login",
-        data={"username": user_a["email"], "password": user_a["password"]},
+        json={"email": user_a["email"], "password": user_a["password"]},
     )
     assert res.status_code == 200
     assert res.json()["access_token"]
@@ -52,7 +52,7 @@ def test_login_ok(client, user_a):
 def test_login_wrong_password_401(client, user_a):
     res = client.post(
         "/api/v1/auth/login",
-        data={"username": user_a["email"], "password": "wrong-password"},
+        json={"email": user_a["email"], "password": "wrong-password"},
     )
     assert res.status_code == 401
 
@@ -60,7 +60,7 @@ def test_login_wrong_password_401(client, user_a):
 def test_login_unknown_email_401(client):
     res = client.post(
         "/api/v1/auth/login",
-        data={"username": "ghost@example.com", "password": "whatever123"},
+        json={"email": "ghost@example.com", "password": "whatever123"},
     )
     assert res.status_code == 401
 

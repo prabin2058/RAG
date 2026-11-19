@@ -1,15 +1,14 @@
-"""Auth endpoints: register, login (OAuth2 form), me."""
+"""Auth endpoints: register, login, me."""
 
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
-from app.schemas.auth import RegisterRequest, TokenResponse, UserOut
+from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,13 +32,10 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(
-    form: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db),
-):
-    """OAuth2 password form so Swagger's 'Authorize' button works."""
-    user = db.query(User).filter(User.email == form.username.lower()).first()
-    if not user or not verify_password(form.password, user.password_hash):
+def login(body: LoginRequest, db: Session = Depends(get_db)):
+    """JSON login — Swagger will auto-store the token after this call."""
+    user = db.query(User).filter(User.email == body.email.lower()).first()
+    if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
