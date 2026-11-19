@@ -31,7 +31,7 @@ export default function Login() {
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 px-4">
       <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-8 shadow-2xl">
         <h1 className="mb-1 text-2xl font-bold text-zinc-100">Welcome back</h1>
-        <p className="mb-6 text-sm text-zinc-500">Sign in to your RAG PDF Q&amp;A workspace</p>
+        <p className="mb-6 text-sm text-zinc-500">Sign in to your RAG Document Q&amp;A workspace</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">

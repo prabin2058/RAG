@@ -69,7 +69,7 @@ export default function Sidebar({ onDocSelected }) {
   })
 
   const handleDelete = async (docId, filename) => {
-    if (!window.confirm(`Delete "${filename}"? This removes the PDF, index, and chat history.`)) return
+    if (!window.confirm(`Delete "${filename}"? This removes the document, index, and chat history.`)) return
     try {
       await deleteDocument(docId)
       if (activeDocId === docId) setActiveDocId(null)
@@ -84,7 +84,7 @@ export default function Sidebar({ onDocSelected }) {
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-4">
         <div>
-          <h1 className="text-lg font-bold">RAG PDF Q&amp;A</h1>
+          <h1 className="text-lg font-bold">RAG Document Q&amp;A</h1>
           <p className="text-xs text-zinc-500">Local · Free · No API keys</p>
         </div>
         <div className="flex items-center gap-2">
@@ -110,7 +110,7 @@ export default function Sidebar({ onDocSelected }) {
           onClick={() => setUploadOpen(true)}
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium hover:bg-indigo-500"
         >
-          <Upload size={16} /> Upload PDF
+          <Upload size={16} /> Upload
         </button>
       </div>
 
@@ -126,7 +126,7 @@ export default function Sidebar({ onDocSelected }) {
         {!isLoading && (!docs || docs.length === 0) && (
           <p className="px-4 py-8 text-center text-sm text-zinc-500">
             No documents yet.
-            <br />Upload a PDF to get started.
+            <br />Upload a document to get started.
           </p>
         )}
 

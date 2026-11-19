@@ -36,7 +36,7 @@ export default function Layout() {
           >
             <PanelLeft size={20} />
           </button>
-          <h1 className="text-sm font-semibold">RAG PDF Q&amp;A</h1>
+          <h1 className="text-sm font-semibold">RAG Document Q&amp;A</h1>
         </header>
 
         <ChatWindow />

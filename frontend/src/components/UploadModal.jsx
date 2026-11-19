@@ -6,6 +6,7 @@ import { FileUp, Loader2, X } from 'lucide-react'
 import { getDocumentStatus, uploadDocument } from '../api.js'
 
 const MAX_SIZE_MB = 50
+const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.csv', '.txt', '.xlsx']
 
 export default function UploadModal({ onClose, onUploaded }) {
   const [dragOver, setDragOver] = useState(false)
@@ -16,7 +17,9 @@ export default function UploadModal({ onClose, onUploaded }) {
 
   const validate = (file) => {
     if (!file) return 'No file selected.'
-    if (!file.name.toLowerCase().endsWith('.pdf')) return 'Only PDF files are allowed.'
+    const ext = '.' + file.name.split('.').pop().toLowerCase()
+    if (!ALLOWED_EXTENSIONS.includes(ext))
+      return `Unsupported file type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`
     if (file.size > MAX_SIZE_MB * 1024 * 1024)
       return `File is too large (max ${MAX_SIZE_MB} MB).`
     return null
@@ -85,7 +88,7 @@ export default function UploadModal({ onClose, onUploaded }) {
 
       <div className="relative w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Upload a PDF</h2>
+          <h2 className="text-lg font-semibold">Upload a document</h2>
           <button
             onClick={onClose}
             disabled={uploading}
@@ -109,14 +112,14 @@ export default function UploadModal({ onClose, onUploaded }) {
             >
               <FileUp size={32} className="text-zinc-400" />
               <p className="text-sm text-zinc-300">
-                Drag &amp; drop a PDF here, or <span className="font-medium text-indigo-400">browse</span>
+                Drag &amp; drop a file here, or <span className="font-medium text-indigo-400">browse</span>
               </p>
-              <p className="text-xs text-zinc-500">PDF only · up to {MAX_SIZE_MB} MB</p>
+              <p className="text-xs text-zinc-500">PDF, DOCX, CSV, TXT, XLSX · up to {MAX_SIZE_MB} MB</p>
             </div>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,application/pdf"
+              accept=".pdf,.docx,.csv,.txt,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="hidden"
               onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])}
             />
