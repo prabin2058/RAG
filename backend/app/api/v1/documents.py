@@ -12,7 +12,7 @@ from app.db.session import SessionLocal
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.document import DocumentListItem, DocumentStatus, UploadResponse
-from app.services import embedding_service, pdf_processor, vector_store
+from app.services import document_processor, embedding_service, vector_store
 
 router = APIRouter(tags=["documents"])
 
@@ -25,10 +25,11 @@ def _process_document(doc_id: str) -> None:
         doc = db.get(Document, doc_id)
         if not doc:
             return
-        pages = pdf_processor.extract_pages(doc.filepath)
-        chunks = pdf_processor.chunk_pages(pages)
+        processor = document_processor.get_processor(doc.filename)
+        pages = processor.extract_pages(doc.filepath)
+        chunks = document_processor.chunk_pages(pages)
         if not chunks:
-            raise ValueError("No text could be extracted from this PDF.")
+            raise ValueError("No text could be extracted from this document.")
 
         embeddings = embedding_service.embed_texts([c["text"] for c in chunks])
         vector_store.add_chunks(doc.id, chunks, embeddings)
@@ -59,12 +60,17 @@ async def upload_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided.")
+
+    ext = document_processor._get_extension(file.filename)
+    if ext not in document_processor.ALLOWED_EXTENSIONS:
+        allowed = ", ".join(sorted(document_processor.ALLOWED_EXTENSIONS))
+        raise HTTPException(status_code=400, detail=f"Unsupported file format. Allowed: {allowed}")
 
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
     size = 0
-    tmp_path = os.path.join(settings.pdf_dir, f"tmp-{uuid.uuid4()}")
+    tmp_path = os.path.join(settings.files_dir, f"tmp-{uuid.uuid4()}")
     with open(tmp_path, "wb") as out:
         while chunk := await file.read(1024 * 1024):
             size += len(chunk)
@@ -79,7 +85,7 @@ async def upload_document(
 
     doc_id = str(uuid.uuid4())
     safe_filename = os.path.basename(file.filename)
-    filepath = os.path.join(settings.pdf_dir, f"{doc_id}_{safe_filename}")
+    filepath = os.path.join(settings.files_dir, f"{doc_id}_{safe_filename}")
     os.replace(tmp_path, filepath)
 
     doc = Document(

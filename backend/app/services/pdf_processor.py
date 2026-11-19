@@ -1,9 +1,12 @@
 """PDF text extraction and chunking."""
 
+import re
+
 import pdfplumber
 
-CHUNK_WORDS = 800  # target words per chunk (~800 tokens)
-OVERLAP_WORDS = 100  # words shared between consecutive chunks
+CHUNK_WORDS = 400  # smaller chunks = more precise retrieval
+OVERLAP_WORDS = 50
+MIN_CHUNK_WORDS = 50  # don't create tiny chunks
 
 
 def extract_pages(filepath: str) -> list[tuple[int, str]]:
@@ -30,27 +33,61 @@ def extract_pages(filepath: str) -> list[tuple[int, str]]:
     return pages
 
 
+def _split_sentences(text: str) -> list[str]:
+    """Split text into sentences using common sentence boundaries."""
+    # Split on sentence-ending punctuation followed by space or end of string
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    return [s.strip() for s in sentences if s.strip()]
+
+
 def chunk_pages(pages: list[tuple[int, str]]) -> list[dict]:
-    """Split each page's text into overlapping word-count chunks.
+    """Split text into semantically meaningful chunks at sentence boundaries.
 
     Returns a list of dicts: {text, page_number, chunk_index}.
     """
     chunks = []
     chunk_index = 0
+
     for page_number, text in pages:
-        words = text.split()
-        start = 0
-        while start < len(words):
-            end = start + CHUNK_WORDS
-            chunk_text = " ".join(words[start:end])
-            if chunk_text:
-                chunks.append(
-                    {
+        sentences = _split_sentences(text)
+        current_chunk_words = []
+        current_word_count = 0
+
+        for sentence in sentences:
+            sentence_words = sentence.split()
+            sentence_word_count = len(sentence_words)
+
+            # If adding this sentence would exceed chunk size, finalize current chunk
+            if current_word_count + sentence_word_count > CHUNK_WORDS and current_chunk_words:
+                chunk_text = " ".join(current_chunk_words)
+                if chunk_text and current_word_count >= MIN_CHUNK_WORDS:
+                    chunks.append({
                         "text": chunk_text,
                         "page_number": page_number,
                         "chunk_index": chunk_index,
-                    }
-                )
+                    })
+                    chunk_index += 1
+
+                # Keep last N words for overlap
+                if current_word_count > OVERLAP_WORDS:
+                    overlap_words = current_chunk_words[-OVERLAP_WORDS:]
+                else:
+                    overlap_words = []
+                current_chunk_words = overlap_words
+                current_word_count = len(overlap_words)
+
+            current_chunk_words.extend(sentence_words)
+            current_word_count += sentence_word_count
+
+        # Finalize remaining text on this page
+        if current_chunk_words:
+            chunk_text = " ".join(current_chunk_words)
+            if chunk_text and current_word_count >= MIN_CHUNK_WORDS:
+                chunks.append({
+                    "text": chunk_text,
+                    "page_number": page_number,
+                    "chunk_index": chunk_index,
+                })
                 chunk_index += 1
-            start += CHUNK_WORDS - OVERLAP_WORDS
+
     return chunks

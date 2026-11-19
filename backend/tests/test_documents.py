@@ -14,8 +14,8 @@ def test_upload_without_token_401(client):
     assert res.status_code == 401
 
 
-def test_upload_non_pdf_400(client, user_a):
-    files = {"file": ("notes.txt", b"not a pdf", "text/plain")}
+def test_upload_unsupported_format_400(client, user_a):
+    files = {"file": ("data.xyz", b"not a valid format", "application/octet-stream")}
     res = client.post("/api/v1/upload", files=files, headers=auth_headers(user_a["token"]))
     assert res.status_code == 400
 
