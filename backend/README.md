@@ -39,14 +39,32 @@ uvicorn app.main:app --reload
 
 ## Configuration (`.env`)
 
+All settings live in `backend/.env` (git-ignored). `.env.example` is the documented,
+secret-free copy: `cp .env.example .env`. Restart the backend after changes; real
+environment variables override the file.
+
+**Switch the AI model by changing one line:**
+
+```bash
+LLM_PROVIDER=gemini   # Google Gemini  -> needs GEMINI_API_KEY,    model: GEMINI_MODEL
+LLM_PROVIDER=claude   # Anthropic Claude -> needs ANTHROPIC_API_KEY, model: CLAUDE_MODEL
+LLM_PROVIDER=ollama   # local & free    -> needs Ollama running,   model: OLLAMA_MODEL
+```
+
+The backend refuses to start if the chosen provider's key is missing, and
+`GET /health` shows which provider and model are active.
+
 | Variable | Default | Purpose |
 |---|---|---|
-| `SECRET_KEY` | dev value | JWT signing key — **change in production** (`python -c "import secrets; print(secrets.token_urlsafe(64))"`) |
+| `SECRET_KEY` | dev value | JWT signing key — **change in production** |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | 1440 | Token lifetime |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama server |
-| `OLLAMA_MODEL` | `gemma4` | LLM model |
+| `LLM_PROVIDER` | `gemini` | `gemini` \| `claude` \| `ollama` |
+| `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` | 16000 / 300 | Answer length cap and request timeout (all providers) |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | — / `gemini-2.5-flash` | Google Gemini |
+| `ANTHROPIC_API_KEY` / `CLAUDE_MODEL` / `CLAUDE_EFFORT` | — / `claude-opus-5-5` / `medium` | Anthropic Claude |
+| `OLLAMA_URL` / `OLLAMA_MODEL` / `OLLAMA_NUM_CTX` | `http://localhost:11434` / `gemma4` / 4096 | Local Ollama |
 | `MAX_UPLOAD_MB` | 50 | Upload size cap (413 above this) |
-| `CORS_ORIGINS` | `["*"]` | Comma-separated list in production |
+| `CORS_ORIGINS` | `["*"]` | JSON list of allowed origins in production |
 
 ## API (all under `/api/v1`)
 
