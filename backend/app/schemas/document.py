@@ -15,7 +15,9 @@ class DocumentStatus(BaseModel):
     doc_id: str
     status: str
     num_pages: int
+    progress: int = 0
     error: str | None = None
+    warning: str | None = None
 
 
 class DocumentListItem(BaseModel):
@@ -26,3 +28,4 @@ class DocumentListItem(BaseModel):
     status: str
     num_pages: int
     uploaded_at: datetime
+    warning: str | None = None

@@ -28,6 +28,8 @@ class Document(Base):
     num_pages: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="processing")  # processing|ready|failed
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # 0-100
+    warning: Mapped[str | None] = mapped_column(Text, nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
