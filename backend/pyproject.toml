@@ -18,9 +18,14 @@ dependencies = [
     "alembic",
     "python-docx",
     "openpyxl",
+    "google-genai",
+    "anthropic",
 ]
 
 [project.optional-dependencies]
+ocr = [
+    "pytesseract",  # also needs the tesseract binary: brew install tesseract
+]
 dev = [
     "pytest",
     "httpx",

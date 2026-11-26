@@ -14,3 +14,6 @@ alembic
 python-docx
 openpyxl
 google-genai
+anthropic
+# Optional OCR for scanned PDF pages (also needs: brew install tesseract)
+pytesseract
