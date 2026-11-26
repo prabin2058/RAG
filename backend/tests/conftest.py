@@ -3,6 +3,10 @@
 import os
 import tempfile
 
+# Tests never call a real LLM: use the provider that needs no API key, so the
+# suite runs without secrets (real env vars override backend/.env).
+os.environ["LLM_PROVIDER"] = "ollama"
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
