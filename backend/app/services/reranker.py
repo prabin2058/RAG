@@ -20,7 +20,7 @@ def rerank_chunks(
 ) -> list[dict]:
     """Re-score chunks using a cross-encoder and return the top_n most relevant.
 
-    Each chunk dict must have a 'snippet' key with the text content.
+    Scores the full chunk text ('text'), falling back to the 'snippet' preview.
     Returns chunks sorted by cross-encoder score (descending), with 'rerank_score' added.
     """
     if not chunks:
@@ -29,7 +29,7 @@ def rerank_chunks(
     model = _get_model()
 
     # Build query-document pairs for the cross-encoder
-    pairs = [(query, c["snippet"]) for c in chunks]
+    pairs = [(query, c.get("text") or c["snippet"]) for c in chunks]
 
     # Get cross-encoder scores
     scores = model.predict(pairs)

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.conversation import Conversation
 from app.models.document import Document
@@ -25,7 +26,8 @@ from app.schemas.query import (
 )
 from app.services import embedding_service, llm_service, vector_store
 from app.services.hybrid_search import hybrid_search
-from app.services.llm_service import OllamaUnavailableError
+from app.services.llm_service import LLMUnavailableError
+from app.services.reranker import rerank_chunks
 
 router = APIRouter(tags=["query"])
 
@@ -41,6 +43,14 @@ Chat history:
 Question: {question}
 
 Answer:"""
+
+NOT_FOUND_ANSWER = "I couldn't find this information in the document."
+
+
+# Chunks kept after keyword scoring and passed on to the reranker. How many are
+# fetched first and how many the LLM finally reads are set in backend/.env
+# (RETRIEVAL_CANDIDATES, RETRIEVAL_TOP_K).
+HYBRID_KEEP = 20
 
 
 def _get_owned_document(db: Session, doc_id: str, user: User) -> Document:
@@ -58,7 +68,7 @@ def _get_owned_conversation(db: Session, conversation_id: str, doc: Document) ->
 
 
 def _format_context(chunks: list[dict]) -> str:
-    return "\n\n".join(f"[Page {c['page_number']}]\n{c['snippet']}" for c in chunks)
+    return "\n\n".join(f"[Page {c['page_number']}]\n{c.get('text') or c['snippet']}" for c in chunks)
 
 
 def _last_turns(db: Session, conversation_id: str, n: int = 3) -> str:
@@ -71,16 +81,12 @@ def _last_turns(db: Session, conversation_id: str, n: int = 3) -> str:
     return "\n".join(f"{m.role}: {m.content}" for m in msgs[-n:])
 
 
-@router.post("/query", response_model=QueryResponse)
-def query_document(
-    req: QueryRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def _prepare(req: QueryRequest, db: Session, user: User) -> tuple[Document, Conversation]:
+    """Validate the request and return the document and conversation to use."""
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
-    doc = _get_owned_document(db, req.doc_id, current_user)
+    doc = _get_owned_document(db, req.doc_id, user)
     if doc.status != "ready":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -94,30 +100,61 @@ def query_document(
         db.add(conversation)
         db.commit()
         db.refresh(conversation)
+    return doc, conversation
 
-    # Embed the raw question directly (skip HyDE for speed)
-    question_embedding = embedding_service.embed_texts([req.question])[0]
-    # Retrieve candidates via hybrid search
-    candidate_chunks = vector_store.query_chunks(
-        doc.id, question_embedding, k=5,
+
+def _retrieve(req: QueryRequest, doc: Document) -> list[dict]:
+    """Find the chunks that best answer the question.
+
+    1. Fetch many candidates by meaning (vector search).
+    2. Re-score them with keywords too (hybrid) and keep the best HYBRID_KEEP.
+    3. Rerank those with the cross-encoder, which reads question and chunk
+       together, and keep the best RETRIEVAL_TOP_K for the LLM.
+    """
+    question_embedding = embedding_service.embed_query(req.question)
+    candidates = vector_store.query_chunks(
+        doc.id, question_embedding, k=settings.RETRIEVAL_CANDIDATES,
         page_start=req.page_start, page_end=req.page_end,
     )
-    if candidate_chunks:
-        chunks = hybrid_search(req.question, candidate_chunks, top_n=3)
-    else:
-        chunks = []
+    if not candidates:
+        return []
+    shortlist = hybrid_search(req.question, candidates, top_n=HYBRID_KEEP)
+    return rerank_chunks(req.question, shortlist, top_n=settings.RETRIEVAL_TOP_K)
+
+
+def _build_prompt(db: Session, conversation: Conversation, question: str, chunks: list[dict]) -> str:
+    return PROMPT_TEMPLATE.format(
+        retrieved_chunks_with_page_numbers=_format_context(chunks),
+        last_3_turns=_last_turns(db, conversation.id),
+        question=question,
+    )
+
+
+def _save_turn(conversation_id: str, question: str, answer: str) -> None:
+    """Store the question and answer (own session: safe inside a stream)."""
+    with SessionLocal() as s:
+        s.add(Message(conversation_id=conversation_id, role="user", content=question))
+        s.add(Message(conversation_id=conversation_id, role="assistant", content=answer))
+        s.commit()
+
+
+@router.post("/query", response_model=QueryResponse)
+def query_document(
+    req: QueryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    doc, conversation = _prepare(req, db, current_user)
+    chunks = _retrieve(req, doc)
 
     if not chunks:
-        answer = "I couldn't find this information in the document."
+        answer = NOT_FOUND_ANSWER
     else:
-        prompt = PROMPT_TEMPLATE.format(
-            retrieved_chunks_with_page_numbers=_format_context(chunks),
-            last_3_turns=_last_turns(db, conversation.id),
-            question=req.question,
-        )
         try:
-            answer = llm_service.generate_answer(prompt)
-        except OllamaUnavailableError as e:
+            answer = llm_service.generate_answer(
+                _build_prompt(db, conversation, req.question, chunks)
+            )
+        except LLMUnavailableError as e:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
             ) from e
@@ -136,83 +173,45 @@ def query_document_stream(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Streaming version — returns newline-delimited JSON tokens."""
-    if not req.question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+    """Streaming version — returns newline-delimited JSON tokens.
 
-    doc = _get_owned_document(db, req.doc_id, current_user)
-    if doc.status != "ready":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Document is not ready yet (status: {doc.status}).",
-        )
-
-    if req.conversation_id:
-        conversation = _get_owned_conversation(db, req.conversation_id, doc)
-    else:
-        conversation = Conversation(id=str(uuid.uuid4()), doc_id=doc.id)
-        db.add(conversation)
-        db.commit()
-        db.refresh(conversation)
-
-    # Embed the raw question directly (skip HyDE for speed)
-    question_embedding = embedding_service.embed_texts([req.question])[0]
-    # Retrieve candidates via hybrid search
-    candidate_chunks = vector_store.query_chunks(
-        doc.id, question_embedding, k=5,
-        page_start=req.page_start, page_end=req.page_end,
-    )
-    if candidate_chunks:
-        chunks = hybrid_search(req.question, candidate_chunks, top_n=3)
-    else:
-        chunks = []
-
+    The last line always has ``done: true`` with ``conversation_id`` and
+    ``sources``, or ``error`` if the LLM failed.
+    """
+    doc, conversation = _prepare(req, db, current_user)
+    chunks = _retrieve(req, doc)
+    conversation_id = conversation.id
     sources = [{"page_number": c["page_number"], "snippet": c["snippet"]} for c in chunks]
 
-    if not chunks:
-        full_answer = "I couldn't find this information in the document."
+    def final_line(token: str = "") -> str:
+        return json.dumps({
+            "token": token,
+            "done": True,
+            "conversation_id": conversation_id,
+            "sources": sources,
+        }) + "\n"
 
+    if not chunks:
         def empty_stream():
-            yield json.dumps({"token": full_answer, "done": True, "sources": sources}) + "\n"
-            # Persist the messages
-            with SessionLocal() as s:
-                s.add(Message(conversation_id=conversation.id, role="user", content=req.question))
-                s.add(Message(conversation_id=conversation.id, role="assistant", content=full_answer))
-                s.commit()
+            _save_turn(conversation_id, req.question, NOT_FOUND_ANSWER)
+            yield final_line(NOT_FOUND_ANSWER)
 
         return StreamingResponse(empty_stream(), media_type="application/x-ndjson")
 
-    prompt = PROMPT_TEMPLATE.format(
-        retrieved_chunks_with_page_numbers=_format_context(chunks),
-        last_3_turns=_last_turns(db, conversation.id),
-        question=req.question,
-    )
-
-    collected = []
+    prompt = _build_prompt(db, conversation, req.question, chunks)
 
     def stream_tokens():
+        collected = []
         try:
             for token in llm_service.generate_answer_stream(prompt):
                 collected.append(token)
                 yield json.dumps({"token": token, "done": False}) + "\n"
-        except OllamaUnavailableError as e:
+        except LLMUnavailableError as e:
             yield json.dumps({"error": str(e), "done": True}) + "\n"
             return
 
-        full_answer = "".join(collected).strip()
-        # Persist the messages
-        with SessionLocal() as s:
-            s.add(Message(conversation_id=conversation.id, role="user", content=req.question))
-            s.add(Message(conversation_id=conversation.id, role="assistant", content=full_answer))
-            s.commit()
-
-        # Send final metadata (sources + conversation_id)
-        yield json.dumps({
-            "token": "",
-            "done": True,
-            "conversation_id": conversation.id,
-            "sources": sources,
-        }) + "\n"
+        _save_turn(conversation_id, req.question, "".join(collected).strip())
+        yield final_line()
 
     return StreamingResponse(stream_tokens(), media_type="application/x-ndjson")
 

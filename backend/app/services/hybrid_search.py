@@ -75,7 +75,7 @@ def hybrid_search(
         return []
 
     query_tokens = _tokenize(query)
-    document_tokens = [_tokenize(c["snippet"]) for c in vector_chunks]
+    document_tokens = [_tokenize(c.get("text") or c["snippet"]) for c in vector_chunks]
 
     # Get BM25 scores
     bm25_scores = _bm25_scores(query_tokens, document_tokens)
