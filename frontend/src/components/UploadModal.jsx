@@ -33,6 +33,7 @@ export default function UploadModal({ onClose, onUploaded }) {
           clearInterval(interval)
           setStatusText('Done!')
           toast.success('Document processed and ready')
+          if (res.warning) toast(res.warning, { icon: '⚠️', duration: 8000 })
           await new Promise((r) => setTimeout(r, 400)) // let the user see the success state
           onUploaded()
           queryClient.invalidateQueries({ queryKey: ['documents'] })
@@ -42,7 +43,12 @@ export default function UploadModal({ onClose, onUploaded }) {
           setUploading(false)
           setStatusText('')
         } else {
-          setStatusText('Extracting, chunking, and embedding…')
+          const pct = res.progress || 0
+          setStatusText(
+            pct < 60
+              ? `Reading pages… ${pct}%`
+              : `Embedding and indexing… ${pct}%`,
+          )
         }
       } catch (err) {
         clearInterval(interval)
