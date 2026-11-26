@@ -22,6 +22,9 @@ def _preload_models():
             log.info("Preloading embedding model...")
             load_embed()
             log.info("Embedding model ready.")
+            from app.services.reranker import _get_model as load_reranker
+            load_reranker()
+            log.info("Reranker model ready.")
         except Exception as e:
             log.warning("Failed to preload embedding model: %s", e)
 
@@ -48,7 +51,11 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "llm_provider": settings.LLM_PROVIDER,
+            "llm_model": settings.llm_model,
+        }
 
     # Configure OpenAPI schema for Swagger auto-authorize
     def custom_openapi():
