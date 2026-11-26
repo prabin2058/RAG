@@ -17,29 +17,64 @@ from app.services import document_processor, embedding_service, vector_store
 router = APIRouter(tags=["documents"])
 
 
+# Chunks embedded and stored per batch: keeps memory flat and stays under
+# ChromaDB's per-call limit even for very large documents.
+EMBED_BATCH_SIZE = 256
+# Share of the progress bar used by text extraction; the rest is embedding.
+EXTRACT_SHARE = 60
+
+
 def _process_document(doc_id: str) -> None:
     """Background task: extract, chunk, embed, store. Own session (request's
     session closes before background tasks run)."""
     db = SessionLocal()
+    doc = None
+    last_saved = -1
+
+    def save_progress(percent: int) -> None:
+        nonlocal last_saved
+        percent = max(0, min(100, int(percent)))
+        if percent - last_saved >= 2 or percent == 100:
+            doc.progress = percent
+            db.commit()
+            last_saved = percent
+
     try:
         doc = db.get(Document, doc_id)
         if not doc:
             return
         processor = document_processor.get_processor(doc.filename)
-        pages = processor.extract_pages(doc.filepath)
-        chunks = document_processor.chunk_pages(pages)
+        pages = processor.extract_pages(
+            doc.filepath,
+            on_progress=lambda done, total: save_progress(EXTRACT_SHARE * done / total),
+        )
+        chunks = document_processor.chunk_pages(
+            pages,
+            count_tokens=embedding_service.count_tokens,
+            max_tokens=embedding_service.max_tokens(),
+        )
         if not chunks:
             raise ValueError("No text could be extracted from this document.")
+        save_progress(EXTRACT_SHARE)
 
-        embeddings = embedding_service.embed_texts([c["text"] for c in chunks])
-        vector_store.add_chunks(doc.id, chunks, embeddings)
+        vector_store.delete_collection(doc.id)  # clean slate if this is a retry
+        for start in range(0, len(chunks), EMBED_BATCH_SIZE):
+            batch = chunks[start : start + EMBED_BATCH_SIZE]
+            embeddings = embedding_service.embed_texts([c["text"] for c in batch])
+            vector_store.add_chunks(doc.id, batch, embeddings)
+            done = start + len(batch)
+            save_progress(EXTRACT_SHARE + (100 - EXTRACT_SHARE) * done / len(chunks))
 
-        doc.num_pages = len(pages)
+        doc.num_pages = processor.total_pages or len(pages)
+        doc.warning = " ".join(processor.warnings) or None
+        doc.progress = 100
         doc.status = "ready"
         doc.error = None
     except Exception as e:
-        doc.status = "failed"
-        doc.error = str(e)
+        if doc is not None:
+            doc.status = "failed"
+            doc.error = str(e)
+        vector_store.delete_collection(doc_id)  # don't leave half an index behind
     finally:
         db.commit()
         db.close()
@@ -111,7 +146,12 @@ def get_document_status(
 ):
     doc = _get_owned_document(db, doc_id, current_user)
     return DocumentStatus(
-        doc_id=doc.id, status=doc.status, num_pages=doc.num_pages, error=doc.error
+        doc_id=doc.id,
+        status=doc.status,
+        num_pages=doc.num_pages,
+        progress=doc.progress,
+        error=doc.error,
+        warning=doc.warning,
     )
 
 

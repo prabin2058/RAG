@@ -20,19 +20,22 @@ def add_chunks(doc_id: str, chunks: list[dict], embeddings: list[list[float]]) -
     collection = _get_client().get_or_create_collection(
         name=doc_id, metadata={"hnsw:space": "cosine"}
     )
-    collection.add(
-        ids=[f"{doc_id}-{c['chunk_index']}" for c in chunks],
-        embeddings=embeddings,
-        documents=[c["text"] for c in chunks],
-        metadatas=[
-            {
-                "document_id": doc_id,
-                "page_number": c["page_number"],
-                "chunk_index": c["chunk_index"],
-            }
-            for c in chunks
-        ],
-    )
+    step = _get_client().get_max_batch_size()
+    for i in range(0, len(chunks), step):
+        part = chunks[i : i + step]
+        collection.add(
+            ids=[f"{doc_id}-{c['chunk_index']}" for c in part],
+            embeddings=embeddings[i : i + step],
+            documents=[c["text"] for c in part],
+            metadatas=[
+                {
+                    "document_id": doc_id,
+                    "page_number": c["page_number"],
+                    "chunk_index": c["chunk_index"],
+                }
+                for c in part
+            ],
+        )
 
 
 def query_chunks(
@@ -76,7 +79,8 @@ def query_chunks(
         chunks.append(
             {
                 "page_number": int(meta.get("page_number", 0)),
-                "snippet": text[:500],  # keep snippets short for the prompt
+                "text": text,  # full chunk — this is what the LLM reads
+                "snippet": text[:500],  # short preview for the citation shown in the UI
                 "distance": float(dist),
             }
         )
